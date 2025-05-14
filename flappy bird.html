@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flappy Bird Fullscreen + Ad + Score</title>
+<style>
+  * {
+    margin: 0; padding: 0; box-sizing: border-box;
+  }
+  html, body {
+    height: 100%; overflow: hidden; /* no scroll */
+    background-color: #70c5ce;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  #game-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    background-color: #fff;
+    border: 2px solid #000;
+    width: 100%;
+    height: 100%;
+  }
+  #game-over, #ad-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 2.5rem;
+    color: #fff;
+    background-color: rgba(0,0,0,0.6);
+    padding: 15px 30px;
+    border-radius: 10px;
+    display: none;
+    user-select: none;
+  }
+  #restartButton, #skipAdButton {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 10px 25px;
+    font-size: 1.2rem;
+    background-color: #ff0;
+    border: none;
+    border-radius: 7px;
+    cursor: pointer;
+    display: none;
+    user-select: none;
+  }
+  #restartButton {
+    top: 60%;
+  }
+  #skipAdButton {
+    top: 65%;
+  }
+  #score {
+    position: absolute;
+    top: 15px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 2rem;
+    color: #fff;
+    text-shadow: 2px 2px 4px #000;
+    user-select: none;
+  }
+</style>
+</head>
+<body>
+<div id="game-container">
+  <canvas id="gameCanvas"></canvas>
+  <div id="ad-text">I'm just waiting your time</div>
+  <button id="skipAdButton">Skip Ad (5)</button>
+  <div id="game-over">Game Over!</div>
+  <button id="restartButton">Restart</button>
+  <div id="score">Score: 0</div>
+</div>
+
+<script>
+  const canvas = document.getElementById("gameCanvas");
+  const ctx = canvas.getContext("2d");
+  const adText = document.getElementById("ad-text");
+  const skipAdButton = document.getElementById("skipAdButton");
+  const gameOverText = document.getElementById("game-over");
+  const restartButton = document.getElementById("restartButton");
+  const scoreDisplay = document.getElementById("score");
+  const gameContainer = document.getElementById("game-container");
+
+  let width, height;
+  function resizeCanvas() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+  }
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  // Bird properties scaled for fullscreen
+  const bird = {
+    x: width * 0.1,
+    y: height / 2,
+    width: 40,
+    height: 30,
+    gravity: 0.8,
+    lift: -15,
+    velocity: 0,
+    jump() {
+      this.velocity = this.lift;
+    },
+    move() {
+      this.velocity += this.gravity;
+      this.velocity *= 0.9; // air resistance for smoothness
+      this.y += this.velocity;
+      if (this.y + this.height > height) {
+        this.y = height - this.height;
+        this.velocity = 0;
+      }
+      if (this.y < 0) {
+        this.y = 0;
+        this.velocity = 0;
+      }
+    },
+    draw() {
+      ctx.fillStyle = "#ff0";
+      ctx.fillRect(this.x, this.y, this.width, this.height);
+    }
+  };
+
+  // Pipes setup
+  const pipes = [];
+  const pipeWidth = width * 0.1;
+  const pipeGap = height * 0.25;
+  const pipeSpeed = 4;
+
+  // Score
+  let score = 0;
+
+  function createPipe() {
+    const topHeight = Math.random() * (height - pipeGap - 100) + 50; // keep gap inside screen
+    pipes.push({
+      x: width,
+      topHeight,
+      bottomHeight: height - topHeight - pipeGap,
+      passed: false // track if bird passed pipe for scoring
+    });
+  }
+
+  function drawPipes() {
+    ctx.fillStyle = "#008000";
+    pipes.forEach(pipe => {
+      // top pipe
+      ctx.fillRect(pipe.x, 0, pipeWidth, pipe.topHeight);
+      // bottom pipe
+      ctx.fillRect(pipe.x, height - pipe.bottomHeight, pipeWidth, pipe.bottomHeight);
+      pipe.x -= pipeSpeed;
+
+      // Reset pipe to right when fully offscreen (left)
+      if (pipe.x + pipeWidth < 0) {
+        pipe.x = width;
+        pipe.topHeight = Math.random() * (height - pipeGap - 100) + 50;
+        pipe.bottomHeight = height - pipe.topHeight - pipeGap;
+        pipe.passed = false;
+      }
+
+      // Check if bird passed pipe for scoring
+      if (!pipe.passed && pipe.x + pipeWidth < bird.x) {
+        pipe.passed = true;
+        score++;
+        scoreDisplay.textContent = `Score: ${score}`;
+      }
+    });
+  }
+
+  function checkCollisions() {
+    for (let pipe of pipes) {
+      if (
+        bird.x + bird.width > pipe.x &&
+        bird.x < pipe.x + pipeWidth &&
+        (bird.y < pipe.topHeight || bird.y + bird.height > height - pipe.bottomHeight)
+      ) {
+        gameOver();
+      }
+    }
+    // Ground or ceiling collision handled in bird move()
+  }
+
+  // Game state
+  let gameLoopInterval;
+  let isGameOver = false;
+  let adTimeout, skipTimer;
+  let skipCount = 5;
+  let adVisible = false;
+
+  function gameOver() {
+    clearInterval(gameLoopInterval);
+    isGameOver = true;
+    gameOverText.style.display = "block";
+    restartButton.style.display = "inline-block";
+    scoreDisplay.style.top = "40%";
+  }
+
+  function restartGame() {
+    bird.y = height / 2;
+    bird.velocity = 0;
+    pipes.length = 0;
+    score = 0;
+    scoreDisplay.textContent = "Score: 0";
+    isGameOver = false;
+    gameOverText.style.display = "none";
+    restartButton.style.display = "none";
+    scoreDisplay.style.top = "15px";
+
+    startAd();
+  }
+
+  function gameLoop() {
+    if (isGameOver || adVisible) return;
+    ctx.clearRect(0, 0, width, height);
+    bird.move();
+    bird.draw();
+    drawPipes();
+    checkCollisions();
+  }
+
+  // Controls
+  window.addEventListener("keydown", (e) => {
+    if (e.code === "Space" && !isGameOver && !adVisible) {
+      bird.jump();
+    }
+  });
+
+  restartButton.addEventListener("click", () => {
+    restartGame();
+  });
+
+  skipAdButton.addEventListener("click", () => {
+    endAd();
+  });
+
+  function startAd() {
+    // Show ad text after 2 seconds
+    adVisible = true;
+    adText.style.display = "block";
+    skipAdButton.style.display = "inline-block";
+    skipCount = 5;
+    skipAdButton.textContent = `Skip Ad (${skipCount})`;
+
+    // Start countdown
+    skipTimer = setInterval(() => {
+      skipCount--;
+      if (skipCount <= 0) {
+        endAd();
+      } else {
+        skipAdButton.textContent = `Skip Ad (${skipCount})`;
+      }
+    }, 1000);
+
+    // Start game after 7 sec total (2s wait + 5s ad)
+    adTimeout = setTimeout(() => {
+      endAd();
+    }, 7000);
+
+    // Create pipes
+    if (pipes.length === 0) {
+      createPipe();
+      createPipe(); // two pipes at start, spaced out
+      pipes[1].x += width / 2;
+    }
+
+    // Start game loop
+    gameLoopInterval = setInterval(gameLoop, 1000 / 60);
+  }
+
+  function endAd() {
+    adVisible = false;
+    adText.style.display = "none";
+    skipAdButton.style.display = "none";
+    clearInterval(skipTimer);
+    clearTimeout(adTimeout);
+  }
+
+  // Init
+  restartGame();
+</script>
+</body>
+</html>
